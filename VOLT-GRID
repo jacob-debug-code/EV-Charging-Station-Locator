@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VOLT//GRID - EV Station Network</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #03050c;
+    --panel: rgba(8, 18, 40, .72);
+    --line: rgba(0, 170, 255, .28);
+    --blue: #00b4ff;
+    --blue2: #2f6bff;
+    --ice: #9fe4ff;
+    --ok: #00ffc8;
+    --bad: #ff3b6b;
+    --txt: #d6ecff;
+    --head: 'Orbitron', 'Segoe UI', sans-serif;
+    --body: 'Rajdhani', 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(47,107,255,.25), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(0,180,255,.18), transparent 60%),
+      var(--bg);
+    color: var(--txt);
+    font-family: var(--body);
+    font-size: 17px;
+    min-height: 100vh;
+  }
+  /* animated grid overlay */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+      linear-gradient(rgba(0,180,255,.07) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,180,255,.07) 1px, transparent 1px);
+    background-size: 46px 46px;
+    mask-image: radial-gradient(ellipse at center, #000 30%, transparent 80%);
+    animation: drift 14s linear infinite;
+  }
+  @keyframes drift { to { background-position: 46px 46px; } }
+  /* scanline */
+  body::after {
+    content: ""; position: fixed; left: 0; right: 0; height: 120px; top: -120px; z-index: 1; pointer-events: none;
+    background: linear-gradient(transparent, rgba(0,180,255,.06), transparent);
+    animation: scan 7s linear infinite;
+  }
+  @keyframes scan { to { top: 100%; } }
+
+  header {
+    position: sticky; top: 0; z-index: 1000;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 14px 28px;
+    background: rgba(3, 8, 20, .85); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--line);
+    box-shadow: 0 0 30px rgba(0,180,255,.15);
+  }
+  .logo { font-family: var(--head); font-weight: 900; font-size: 22px; letter-spacing: 3px; flex: 1; color: #fff; text-shadow: 0 0 14px var(--blue); }
+  .logo span { color: var(--blue); }
+  .logo small { display:block; font-size: 9px; letter-spacing: 5px; color: var(--ice); opacity:.6; font-weight:500; }
+
+  button {
+    font-family: var(--head); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; font-weight: 700;
+    color: var(--blue); background: rgba(0,180,255,.07);
+    border: 1px solid var(--blue); border-radius: 4px; padding: 10px 16px; cursor: pointer;
+    transition: .25s; position: relative;
+  }
+  button:hover { background: var(--blue); color: #001; box-shadow: 0 0 22px var(--blue); }
+  button.nav.on { background: var(--blue); color: #001; box-shadow: 0 0 18px var(--blue); }
+  button.off { color: var(--bad); border-color: var(--bad); background: rgba(255,59,107,.07); }
+  button.off:hover { background: var(--bad); color: #fff; box-shadow: 0 0 22px var(--bad); }
+  button.big { padding: 15px 30px; font-size: 13px; background: linear-gradient(90deg, var(--blue2), var(--blue)); color: #fff; border: 0; box-shadow: 0 0 25px rgba(0,180,255,.5); }
+  button.big:hover { box-shadow: 0 0 40px var(--blue); transform: translateY(-2px); color:#fff; }
+
+  main { position: relative; z-index: 2; max-width: 1280px; margin: auto; padding: 30px 24px 60px; }
+  h2 { font-family: var(--head); letter-spacing: 4px; font-size: 20px; margin: 0 0 6px; color: #fff; text-shadow: 0 0 12px var(--blue); }
+  .sub { color: var(--ice); opacity: .6; margin: 0 0 22px; letter-spacing: 1px; }
+
+  .glass {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    backdrop-filter: blur(10px); box-shadow: 0 0 30px rgba(0,100,255,.12), inset 0 0 30px rgba(0,180,255,.04);
+  }
+
+  /* stat cards */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin-bottom: 26px; }
+  .stat { padding: 18px 22px; position: relative; overflow: hidden; }
+  .stat::after { content:""; position:absolute; left:0; top:0; height:2px; width:100%; background: linear-gradient(90deg, transparent, var(--c, var(--blue)), transparent); }
+  .stat label { font-size: 12px; letter-spacing: 3px; text-transform: uppercase; opacity: .65; }
+  .stat b { display: block; font-family: var(--head); font-size: 40px; margin-top: 4px; color: var(--c, var(--blue)); text-shadow: 0 0 18px var(--c, var(--blue)); }
+
+  /* filter bar */
+  .bar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .bar .spacer { flex: 1; }
+
+  /* table */
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th { font-family: var(--head); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; text-align: left; color: var(--blue); padding: 14px 16px; border-bottom: 1px solid var(--blue); }
+  td { padding: 13px 16px; border-bottom: 1px solid rgba(0,180,255,.12); }
+  tbody tr { transition: .2s; }
+  tbody tr:hover { background: rgba(0,180,255,.1); box-shadow: inset 3px 0 0 var(--blue); }
+  .badge { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; letter-spacing: 1px; font-size: 14px; }
+  .badge i { width: 9px; height: 9px; border-radius: 50%; background: currentColor; box-shadow: 0 0 10px currentColor; animation: blink 1.6s infinite; }
+  .badge.active { color: var(--ok); }
+  .badge.inactive { color: var(--bad); }
+  @keyframes blink { 50% { opacity: .35; } }
+  .mono { font-family: var(--head); font-size: 13px; }
+
+  /* map page */
+  #mapPage { display: none; }
+  .mapwrap { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 18px; }
+  @media (max-width: 900px) { .mapwrap { grid-template-columns: 1fr; } }
+  #mapBox { position: relative; padding: 6px; }
+  #map { height: 600px; width: 100%; border-radius: 8px; background: #0a1226; }
+  #mapMsg { display: none; position: absolute; z-index: 999; left: 20px; right: 20px; bottom: 20px; padding: 12px 16px; border-radius: 6px; background: rgba(255,59,107,.15); border: 1px solid var(--bad); color: #ffd0dc; }
+  .legend { display:flex; gap:22px; margin-bottom: 14px; font-size: 15px; flex-wrap: wrap; }
+  .legend span { display:flex; align-items:center; gap:8px; }
+  .legend i { width:11px; height:11px; border-radius:50%; display:inline-block; }
+
+  /* map markers */
+  .mk { position: relative; width: 22px; height: 22px; }
+  .mk .core { position:absolute; inset: 5px; border-radius: 50%; background: var(--c); box-shadow: 0 0 14px var(--c), 0 0 28px var(--c); border: 2px solid #fff; }
+  .mk .ring { position:absolute; inset: 0; border-radius: 50%; border: 2px solid var(--c); animation: ping 2s infinite; }
+  .mk.active { --c: #00ffc8; }
+  .mk.inactive { --c: #ff3b6b; }
+  .mk.user { --c: #2f8bff; }
+  .mk.user .core { inset: 3px; }
+  @keyframes ping { 0% { transform: scale(.6); opacity: 1; } 100% { transform: scale(2.2); opacity: 0; } }
+  .leaflet-tooltip { background: rgba(3,8,20,.95); color: var(--ice); border: 1px solid var(--blue); font-family: var(--body); font-size: 14px; box-shadow: 0 0 14px rgba(0,180,255,.5); }
+  .leaflet-tooltip-top:before { border-top-color: var(--blue); }
+  .leaflet-container { font-family: var(--body); }
+  .osm-dark { filter: invert(1) hue-rotate(200deg) brightness(.95) contrast(.9) saturate(.8); }
+  .leaflet-control-layers { background: #08122a !important; color: var(--ice) !important; border: 1px solid var(--line) !important; }
+  .leaflet-control-zoom a { background: #08122a !important; color: var(--blue) !important; border-color: var(--line) !important; }
+  .leaflet-control-attribution { background: rgba(3,8,20,.7) !important; color: #6b86a8 !important; }
+  .leaflet-control-attribution a { color: var(--blue) !important; }
+
+  /* details panel */
+  #details { padding: 22px; }
+  #details h3 { font-family: var(--head); letter-spacing: 3px; font-size: 13px; color: var(--blue); margin: 0 0 16px; }
+  .empty { text-align: center; opacity: .55; padding: 60px 10px; }
+  .empty .ico { font-size: 44px; display:block; margin-bottom: 10px; filter: drop-shadow(0 0 10px var(--blue)); }
+  .sname { font-family: var(--head); font-size: 17px; color: #fff; margin: 0 0 16px; text-shadow: 0 0 10px var(--blue); line-height: 1.4; }
+  #details table td { padding: 12px 6px; }
+  #details table td:first-child { opacity: .6; letter-spacing: 1px; font-size: 14px; text-transform: uppercase; width: 48%; }
+  .slots { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
+  .slots i { width: 16px; height: 22px; border-radius: 3px; border: 1px solid var(--blue); }
+  .slots i.free { background: var(--ok); border-color: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .fadein { animation: fadein .4s; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(8px); } }
+
+  /* power screen */
+  #offScreen { display: none; position: fixed; inset: 0; z-index: 9999; background: #000; text-align: center; padding-top: 28vh; }
+  #offScreen h1 { font-family: var(--head); letter-spacing: 8px; color: var(--blue); text-shadow: 0 0 25px var(--blue); animation: blink 2s infinite; }
+  #offScreen p { opacity: .55; letter-spacing: 2px; }
+  #offScreen button { margin-top: 26px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">VOLT<span>//</span>GRID<small>EV STATION NETWORK</small></div>
+  <button class="nav" id="navDash" onclick="show('dash')">Dashboard</button>
+  <button class="nav" id="navMap" onclick="show('map')">Live Map</button>
+  <button onclick="regenerate()">Re-scan</button>
+  <button class="off" onclick="powerOff()">⏻ Power Off</button>
+</header>
+
+<main>
+  <!-- DASHBOARD -->
+  <section id="dashPage">
+    <h2>NETWORK DASHBOARD</h2>
+    <p class="sub">All charging nodes - online and offline</p>
+
+    <div class="cards">
+      <div class="glass stat"><label>Total Nodes</label><b id="cTotal">0</b></div>
+      <div class="glass stat" style="--c:var(--ok)"><label>Online</label><b id="cActive">0</b></div>
+      <div class="glass stat" style="--c:var(--bad)"><label>Offline</label><b id="cInactive">0</b></div>
+      <div class="glass stat" style="--c:var(--ice)"><label>Free Slots</label><b id="cSlots">0</b></div>
+    </div>
+
+    <div class="bar">
+      <button class="flt" data-f="all" onclick="setFilter('all')">All</button>
+      <button class="flt" data-f="active" onclick="setFilter('active')">Online</button>
+      <button class="flt" data-f="inactive" onclick="setFilter('inactive')">Offline</button>
+      <span class="spacer"></span>
+      <button class="big" onclick="show('map')">Launch Map ▸</button>
+    </div>
+
+    <div class="glass tablewrap">
+      <table>
+        <thead><tr><th>ID</th><th>Station</th><th>Status</th><th>Price</th><th>Distance</th><th>Free Slots</th></tr></thead>
+        <tbody id="allRows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- MAP -->
+  <section id="mapPage">
+    <h2>LIVE STATION MAP</h2>
+    <p class="sub">Select a node on the map to inspect it</p>
+    <div class="legend">
+      <span><i style="background:#00ffc8;box-shadow:0 0 8px #00ffc8"></i> Online</span>
+      <span><i style="background:#ff3b6b;box-shadow:0 0 8px #ff3b6b"></i> Offline</span>
+      <span><i style="background:#2f8bff;box-shadow:0 0 8px #2f8bff"></i> You</span>
+    </div>
+    <div class="mapwrap">
+      <div class="glass" id="mapBox">
+        <div id="map"></div>
+        <div id="mapMsg">Map tiles could not load. Check your internet connection and refresh.</div>
+      </div>
+      <div class="glass" id="details">
+        <h3>// NODE DETAILS</h3>
+        <div id="detailBox"><div class="empty"><span class="ico">⚡</span>No node selected.<br>Click a marker on the map.</div></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="offScreen">
+  <h1>SYSTEM OFFLINE</h1>
+  <p>You can close this tab.</p>
+  <button class="big" onclick="powerOn()">Power On</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+  // ---------- settings ----------
+  const USER = { lat: 13.0827, lon: 80.2707 };   // Chennai - the "user" location
+  const NAMES = ["Tata Power","Ather Grid","ChargeZone","Statiq","Fortum","EESL","Jio-bp Pulse","Zeon","Volttic","TNEB EV Hub"];
+  // Real Chennai neighbourhoods (all on land, kept west of the coastline)
+  const AREAS = [
+    { n: "T Nagar",        lat: 13.0418, lon: 80.2341 },
+    { n: "Adyar",          lat: 13.0012, lon: 80.2500 },
+    { n: "Anna Nagar",     lat: 13.0850, lon: 80.2101 },
+    { n: "Velachery",      lat: 12.9815, lon: 80.2180 },
+    { n: "Guindy",         lat: 13.0067, lon: 80.2206 },
+    { n: "Egmore",         lat: 13.0732, lon: 80.2609 },
+    { n: "Tambaram",       lat: 12.9249, lon: 80.1000 },
+    { n: "Sholinganallur", lat: 12.9010, lon: 80.2279 },
+    { n: "Porur",          lat: 13.0382, lon: 80.1565 },
+    { n: "Mylapore",       lat: 13.0368, lon: 80.2640 },
+    { n: "Besant Nagar",   lat: 13.0002, lon: 80.2600 },
+    { n: "Kodambakkam",    lat: 13.0521, lon: 80.2255 },
+    { n: "Perambur",       lat: 13.1186, lon: 80.2336 },
+    { n: "Nungambakkam",   lat: 13.0569, lon: 80.2425 },
+    { n: "Thiruvanmiyur",  lat: 12.9830, lon: 80.2530 }
+  ];
+
+  const $ = id => document.getElementById(id);
+  const rand = (a, b) => Math.random() * (b - a) + a;
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+  const pick = arr => arr[randInt(0, arr.length - 1)];
+
+  function distKm(lat1, lon1, lat2, lon2) {
+    const R = 6371, rad = x => x * Math.PI / 180;
+    const dLat = rad(lat2 - lat1), dLon = rad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
+  // ---------- random data ----------
+  let stations = [], filter = "all";
+  function generate() {
+    stations = AREAS.map((area, i) => {
+      // small jitter (~300 m) around a real inland spot, so stations stay on land
+      const lat = area.lat + rand(-0.003, 0.003), lon = area.lon + rand(-0.003, 0.003);
+      const active = Math.random() > 0.3, total = randInt(2, 10);
+      return {
+        id: "EV-" + String(i + 1).padStart(3, "0"),
+        name: pick(NAMES) + " - " + area.n, lat, lon, active,
+        price: rand(12, 25).toFixed(2),
+        dist: distKm(USER.lat, USER.lon, lat, lon).toFixed(2),
+        total, free: active ? randInt(0, total) : 0
+      };
+    });
+  }
+
+  // ---------- dashboard ----------
+  function countUp(el, to) {
+    let n = 0; const step = Math.max(1, Math.ceil(to / 20));
+    const t = setInterval(() => { n = Math.min(to, n + step); el.textContent = n; if (n >= to) clearInterval(t); }, 25);
+  }
+  function badge(s) {
+    return `<span class="badge ${s.active ? 'active' : 'inactive'}"><i></i>${s.active ? 'ONLINE' : 'OFFLINE'}</span>`;
+  }
+  function renderDash() {
+    const act = stations.filter(s => s.active).length;
+    countUp($("cTotal"), stations.length);
+    countUp($("cActive"), act);
+    countUp($("cInactive"), stations.length - act);
+    countUp($("cSlots"), stations.reduce((a, s) => a + s.free, 0));
+
+    document.querySelectorAll(".flt").forEach(b => b.classList.toggle("on", b.dataset.f === filter));
+    const list = stations.filter(s => filter === "all" || (filter === "active") === s.active);
+    $("allRows").innerHTML = list.map(s => `
+      <tr>
+        <td class="mono">${s.id}</td><td>${s.name}</td><td>${badge(s)}</td>
+        <td class="mono">₹${s.price}/kWh</td><td class="mono">${s.dist} km</td>
+        <td class="mono">${s.active ? s.free + ' / ' + s.total : '-'}</td>
+      </tr>`).join("");
+  }
+  function setFilter(f) { filter = f; renderDash(); }
+
+  // ---------- map ----------
+  let leafMap = null, markers = [], tileErrors = 0;
+  const mkIcon = cls => L.divIcon({
+    html: `<div class="mk ${cls}"><div class="ring"></div><div class="core"></div></div>`,
+    className: "", iconSize: [22, 22], iconAnchor: [11, 11]
+  });
+
+  function initMap() {
+    leafMap = L.map("map", { zoomControl: true }).setView([USER.lat, USER.lon], 12);
+    // All sources below are free and need NO API key.
+    // 1) Esri Dark Gray canvas (base + labels)
+    const esriDark = L.layerGroup([
+      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
+        maxZoom: 16, attribution: "Tiles &copy; Esri"
+      }),
+      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16 })
+    ]);
+    // 2) OpenStreetMap, darkened with a CSS filter (needs Live Server / http, not file://)
+    const osmDark = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19, className: "osm-dark",
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    });
+    // 3) Esri satellite
+    const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      maxZoom: 18, attribution: "Tiles &copy; Esri"
+    });
+
+    esriDark.addTo(leafMap);
+    L.control.layers({ "Dark (Esri)": esriDark, "OpenStreetMap": osmDark, "Satellite": sat }, null, { position: "topright" }).addTo(leafMap);
+
+    // auto-fallback: if the dark layer keeps failing, switch to OpenStreetMap
+    esriDark.eachLayer(l => l.on("tileerror", () => {
+      if (++tileErrors === 4) {
+        leafMap.removeLayer(esriDark); osmDark.addTo(leafMap);
+        osmDark.on("tileerror", () => { $("mapMsg").style.display = "block"; });
+      }
+    }));
+    L.marker([USER.lat, USER.lon], { icon: mkIcon("user") }).addTo(leafMap).bindTooltip("You are here");
+  }
+
+  function renderMap() {
+    if (!leafMap) initMap();
+    markers.forEach(m => leafMap.removeLayer(m));
+    markers = stations.map(s => {
+      const m = L.marker([s.lat, s.lon], { icon: mkIcon(s.active ? "active" : "inactive") }).addTo(leafMap);
+      m.bindTooltip(s.name);
+      m.on("click", () => showDetails(s));
+      return m;
+    });
+    $("detailBox").innerHTML = `<div class="empty"><span class="ico">⚡</span>No node selected.<br>Click a marker on the map.</div>`;
+    setTimeout(() => leafMap.invalidateSize(), 100);   // fixes blank map when the container was hidden
+  }
+
+  function showDetails(s) {
+    let slots = "";
+    if (s.active) {
+      slots = `<div class="slots">` + Array.from({ length: s.total }, (_, i) => `<i class="${i < s.free ? 'free' : ''}"></i>`).join("") + `</div>`;
+    }
+    $("detailBox").innerHTML = `<div class="fadein">
+      <p class="sname">${s.name}</p>
+      <table>
+        <tr><td>Status</td><td>${badge(s)}</td></tr>
+        <tr><td>Price</td><td class="mono">₹${s.price} / kWh</td></tr>
+        <tr><td>Distance</td><td class="mono">${s.dist} km</td></tr>
+        <tr><td>Slots</td><td class="mono">${s.active ? s.free + ' / ' + s.total + ' available' : 'N/A - offline'}${slots}</td></tr>
+      </table></div>`;
+  }
+
+  // ---------- navigation ----------
+  function show(page) {
+    $("dashPage").style.display = page === "dash" ? "block" : "none";
+    $("mapPage").style.display = page === "map" ? "block" : "none";
+    $("navDash").classList.toggle("on", page === "dash");
+    $("navMap").classList.toggle("on", page === "map");
+    if (page === "map") renderMap(); else renderDash();
+    window.scrollTo(0, 0);
+  }
+  function regenerate() {
+    generate();
+    show($("mapPage").style.display === "block" ? "map" : "dash");
+  }
+
+  // ---------- power ----------
+  function powerOff() { $("offScreen").style.display = "block"; window.close(); }
+  function powerOn() { $("offScreen").style.display = "none"; }
+
+  // ---------- start ----------
+  generate();
+  show("dash");
+</script>
+</body>
+</html>
